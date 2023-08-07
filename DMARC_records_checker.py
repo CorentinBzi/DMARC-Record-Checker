@@ -10,25 +10,15 @@ import pandas as pd
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# Charger les domaines sans DMARC depuis le fichier
+# Load missing domains from the CSV file into a DataFrame
 def load_domains():
     try:
-        with open('missing_dmarc.csv', 'r') as f:
-            reader = csv.reader(f)
-            return list(reader)
+        df = pd.read_csv('missing_dmarc.csv')
     except FileNotFoundError:
-        return []
+        df = pd.DataFrame(columns=["Domaine", "Date"])
+    return df
 
-missing_domains = load_domains()
-
-# Initialiser le tableau avec les données existantes ou un tableau vide si aucune donnée n'est présente
-if missing_domains:
-    initial_table_content = dbc.Table.from_dataframe(pd.DataFrame(missing_domains, columns=["Domaine", "Date"]), striped=True, bordered=True, hover=True)
-else:
-    empty_df = pd.DataFrame(columns=["Domaine", "Date"])
-    initial_table_content = dbc.Table.from_dataframe(empty_df, striped=True, bordered=True, hover=True)
-
-
+missing_domains_df = load_domains()
 
 app.layout = dbc.Container([
     dbc.Row([
@@ -46,7 +36,7 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             html.H2("Pas de DMARC", className="text-center my-4"),
-            html.Div(id='auto-discover-output', children=initial_table_content)
+            html.Div(id='auto-discover-output', children=dbc.Table.from_dataframe(missing_domains_df, striped=True, bordered=True, hover=True))
         ])
     ])
 ])
@@ -58,6 +48,8 @@ app.layout = dbc.Container([
     [dash.dependencies.State('domain-input', 'value')]
 )
 def check_dns(n_clicks, domain):
+    global missing_domains_df  # Add this line to use the global variable
+
     if n_clicks == 0:
         raise dash.exceptions.PreventUpdate
 
@@ -70,30 +62,27 @@ def check_dns(n_clicks, domain):
         except:
             return dbc.Alert(f"Le domaine {domain} n'existe pas.", color="warning"), dash.no_update
 
-    # Vérifier l'enregistrement DMARC
-    try:
-        dmarc = dns.resolver.resolve('_dmarc.'+domain, 'TXT')
-        return dbc.Alert(f"Enregistrement DMARC pour {domain}: {dmarc[0].to_text()}", color="success"), dash.no_update
-    except:
-        # Vérifier si le domaine existe déjà dans la liste
-        existing_entry = next((entry for entry in missing_domains if entry[0] == domain), None)
-        if existing_entry:
-            missing_domains.remove(existing_entry)
-        missing_domains.append([domain, datetime.now().strftime('%Y-%m-%d')])
+    # Check if the domain already exists in the DataFrame
+    if domain not in missing_domains_df["Domaine"].values:
+        # Vérifier l'enregistrement DMARC
+        try:
+            dmarc = dns.resolver.resolve('_dmarc.' + domain, 'TXT')
+            return dbc.Alert(f"Enregistrement DMARC pour {domain}: {dmarc[0].to_text()}", color="success"), dash.no_update
+        except:
+            missing_domains_df = missing_domains_df.append(
+                {"Domaine": domain, "Date": datetime.now().strftime('%Y-%m-%d')}, ignore_index=True
+            )
+            # Write the updated DataFrame to the CSV file
+            missing_domains_df.to_csv('missing_dmarc.csv', index=False)
 
-        # Écrire la liste mise à jour dans le fichier CSV
-        with open('missing_dmarc.csv', 'w') as f:
-            writer = csv.writer(f)
-            writer.writerows(missing_domains)
-        
-        if missing_domains:
-            table = dbc.Table.from_dataframe(pd.DataFrame(missing_domains, columns=["Domaine", "Date"]), striped=True, bordered=True, hover=True)
-        else:
-            empty_df = pd.DataFrame(columns=["Domaine", "Date"])
-            table = dbc.Table.from_dataframe(empty_df, striped=True, bordered=True, hover=True)
-        return dbc.Alert(f"L'enregistrement DMARC pour {domain} n'a pas pu être trouvé.", color="danger"), table
-
+    if not missing_domains_df.empty:
+        table = dbc.Table.from_dataframe(missing_domains_df, striped=True, bordered=True, hover=True)
+    else:
+        empty_df = pd.DataFrame(columns=["Domaine", "Date"])
+        table = dbc.Table.from_dataframe(empty_df, striped=True, bordered=True, hover=True)
+    return dbc.Alert(f"L'enregistrement DMARC pour {domain} n'a pas pu être trouvé.", color="danger"), table
 
 
 if __name__ == '__main__':
     app.run_server(debug=True)
+
