@@ -1,4 +1,4 @@
-# DMARC Verifier
+# DMARC Record Checker
 
 This application is built using the Dash framework and allows users to verify the DMARC records of a domain. If a domain doesn't have a DMARC record, it will be added to a list of domains without DMARC.
 
